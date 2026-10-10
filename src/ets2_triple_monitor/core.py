@@ -27,6 +27,14 @@ def fov_degrees(size_mm: float, distance_mm: float) -> float:
     return math.degrees(2.0 * math.atan((size_mm / 2.0) / distance_mm))
 
 
+def size_from_diagonal(diagonal_inch: float) -> tuple[float, float]:
+    """Width and height (mm) of a 16:9 screen from its diagonal in inches."""
+    if diagonal_inch <= 0:
+        raise ValueError("The diagonal must be greater than 0.")
+    scale = diagonal_inch * 25.4 / math.hypot(16, 9)
+    return 16 * scale, 9 * scale
+
+
 def bezel_angle_degrees(width_mm: float, distance_mm: float, bezel_mm: float) -> float:
     """Angular correction (degrees) produced by the bezel between two monitors."""
     if bezel_mm <= 0 or width_mm <= 0 or distance_mm <= 0:

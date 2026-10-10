@@ -11,6 +11,7 @@ from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QComboBox,
     QDialog,
     QFileDialog,
     QGridLayout,
@@ -34,6 +35,7 @@ from .core import (
     ets2_user_dir,
     generate_sii,
     preview_text,
+    size_from_diagonal,
 )
 
 APP_NAME = "ETS2 Triple Monitor Configurator"
@@ -52,10 +54,11 @@ class MainWindow(QMainWindow):
         self._defaults = Settings()
         self.edits: dict[str, QLineEdit] = {}
         self.labels: dict[str, str] = {}
+        # Multiplier from the displayed unit to millimetres.
+        self.to_mm = {"distance_mm": 10.0}
 
         self.tabs = QTabWidget()
         self.tabs.addTab(self._tab_screens(), "Screens")
-        self.tabs.addTab(self._tab_camera(), "Camera")
         self.tabs.addTab(self._tab_fov(), "FOV")
         self.tabs.addTab(self._tab_advanced(), "Advanced")
 
@@ -89,7 +92,8 @@ class MainWindow(QMainWindow):
         for i, (key, label) in enumerate(fields):
             row, col = divmod(i, cols)
             grid.addWidget(QLabel(label), row * 2, col)
-            edit = QLineEdit(format_number(getattr(self._defaults, key)))
+            shown = getattr(self._defaults, key) / self.to_mm.get(key, 1.0)
+            edit = QLineEdit(format_number(shown))
             grid.addWidget(edit, row * 2 + 1, col)
             self.edits[key] = edit
             self.labels[key] = label
@@ -117,16 +121,44 @@ class MainWindow(QMainWindow):
     # --------------------------------------------------------
 
     def _tab_screens(self) -> QWidget:
-        dims = self._group(
-            "Physical dimensions",
+        self.size_mode = QComboBox()
+        self.size_mode.addItems(
+            ["Screen size (width x height in mm)", "Diagonal in inches (16:9)"]
+        )
+        mode_box = QGroupBox("Size input")
+        QVBoxLayout(mode_box).addWidget(self.size_mode)
+
+        self.diag_edit = QLineEdit("27")
+        self.diag_group = QGroupBox("Diagonal")
+        diag_layout = QGridLayout(self.diag_group)
+        diag_layout.addWidget(QLabel("Monitor diagonal (inches, 16:9)"), 0, 0)
+        diag_layout.addWidget(self.diag_edit, 1, 0)
+
+        self.size_group = self._group(
+            "Visible screen size",
             [
                 ("width_mm", "Visible monitor width (mm)"),
                 ("height_mm", "Visible monitor height (mm)"),
-                ("bezel_mm", "Total bezel between two monitors (mm)"),
-                ("distance_mm", "Eyes → screen distance (mm)"),
             ],
             cols=2,
         )
+        self.size_mode.currentIndexChanged.connect(self._update_size_mode)
+        self._update_size_mode()
+
+        self.bezel_mode = QComboBox()
+        self.bezel_mode.addItems(
+            ["Combined bezel between two monitors", "Bezel of a single monitor"]
+        )
+        dims = self._group(
+            "Bezel and distance",
+            [
+                ("bezel_mm", "Bezel (mm)"),
+                ("distance_mm", "Eyes → screen distance (cm)"),
+            ],
+            cols=2,
+        )
+        dims.layout().addWidget(self.bezel_mode, 2, 0, 1, 2)
+
         angle = self._group(
             "Side monitor angle",
             [("side_angle", "Physical angle of each side monitor (degrees)")],
@@ -136,9 +168,17 @@ class MainWindow(QMainWindow):
             "Example: 54° means the left monitor is rotated +54° and the right "
             "one -54° relative to the center monitor."
         )
-        return self._page(dims, angle, note)
+        return self._page(
+            mode_box, self.diag_group, self.size_group, dims, angle, note,
+            *self._camera_widgets(),
+        )
 
-    def _tab_camera(self) -> QWidget:
+    def _update_size_mode(self) -> None:
+        by_diagonal = self.size_mode.currentIndex() == 1
+        self.diag_group.setVisible(by_diagonal)
+        self.size_group.setVisible(not by_diagonal)
+
+    def _camera_widgets(self) -> list[QWidget]:
         offset = self._group(
             "Camera Space Offset",
             [
@@ -157,7 +197,7 @@ class MainWindow(QMainWindow):
             [("pitch", "Pitch (°)"), ("roll", "Roll (°)")],
             cols=2,
         )
-        return self._page(note, offset, orientation)
+        return [note, offset, orientation]
 
     def _tab_fov(self) -> QWidget:
         self.auto_fov = QCheckBox(
@@ -235,7 +275,18 @@ class MainWindow(QMainWindow):
                 value = math.nan
             if not math.isfinite(value):
                 raise ValueError(f"{self.labels[key]} must be a valid number.")
-            setattr(s, key, value)
+            setattr(s, key, value * self.to_mm.get(key, 1.0))
+
+        if self.size_mode.currentIndex() == 1:
+            try:
+                diagonal = float(self.diag_edit.text().strip().replace(",", "."))
+            except ValueError:
+                diagonal = math.nan
+            if not math.isfinite(diagonal) or diagonal <= 0:
+                raise ValueError("The diagonal must be a number greater than 0.")
+            s.width_mm, s.height_mm = size_from_diagonal(diagonal)
+        if self.bezel_mode.currentIndex() == 1:
+            s.bezel_mm *= 2  # two adjacent bezels sit between monitors
 
         s.auto_fov = self.auto_fov.isChecked()
         s.render_interior = self.render_interior.isChecked()
