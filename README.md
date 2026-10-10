@@ -84,7 +84,8 @@ git push origin v1.0.1
 The `Build & Release` workflow runs the tests, builds Windows / Linux / macOS
 binaries, and attaches them to a new GitHub Release with auto-generated notes.
 You can also run it manually from the *Actions* tab (it will build artifacts
-without publishing a release).
+without publishing a release when run on a branch; choose an existing tag to
+attach the artifacts to its release.
 
 ## Project layout
 
